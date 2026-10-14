@@ -1,0 +1,21 @@
+# Entorno y credenciales
+.env
+*.env
+!.env.example
+
+# Datos locales de n8n (si se usan bind mounts)
+n8n_data/
+.n8n/
+
+# Sistema y logs
+.DS_Store
+Thumbs.db
+*.log
+
+# Backups y temporales
+*.tmp
+*.bak
+
+# Documentos privados y especificaciones locales
+*.pdf
+

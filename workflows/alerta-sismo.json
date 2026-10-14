@@ -1,0 +1,175 @@
+{
+  "name": "P01 - Alerta de Sismos en Chile (USGS)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger (Cada 15m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://earthquake.usgs.gov/fdsnws/event/1/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "geojson"
+            },
+            {
+              "name": "minmagnitude",
+              "value": "3.5"
+            },
+            {
+              "name": "latitude",
+              "value": "-33.0245"
+            },
+            {
+              "name": "longitude",
+              "value": "-71.5518"
+            },
+            {
+              "name": "maxradiuskm",
+              "value": "600"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "HTTP Request - USGS API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ventana de tiempo en minutos para evitar duplicados sin persistencia externa\nconst VENTANA_MINUTOS = 20;\nconst MIN_MAGNITUD = 4.0;\n\nconst rawData = $input.first().json;\nconst features = rawData.features || [];\n\nconst ahora = Date.now();\nconst limiteTiempo = ahora - (VENTANA_MINUTOS * 60 * 1000);\n\n// Filtrar sismos que hayan ocurrido dentro de la ventana de los últimos 20 minutos\nconst sismosRecientes = features.filter(item => {\n  const t = item.properties.time;\n  const mag = item.properties.mag;\n  return t >= limiteTiempo && mag >= MIN_MAGNITUD;\n});\n\nif (sismosRecientes.length === 0) {\n  return [{\n    json: {\n      alerta_activa: false,\n      total_sismos: 0,\n      mensaje: `Sin sismos detectados en el radio monitoreado en los últimos ${VENTANA_MINUTOS} minutos.`\n    }\n  }];\n}\n\n// Retornar cada sismo como un item individual para n8n\nreturn sismosRecientes.map(item => {\n  const props = item.properties;\n  const coords = item.geometry ? item.geometry.coordinates : [0, 0, 0];\n  const fechaEvento = new Date(props.time).toLocaleString('es-CL', { timeZone: 'America/Santiago' });\n\n  return {\n    json: {\n      alerta_activa: true,\n      id: item.id,\n      magnitud: props.mag,\n      lugar: props.place || 'Chile Central',\n      profundidad_km: coords[2] || 0,\n      longitud: coords[0],\n      latitud: coords[1],\n      hora_local: fechaEvento,\n      url_usgs: props.url,\n      total_sismos: sismosRecientes.length\n    }\n  };\n});"
+      },
+      "id": "3",
+      "name": "Code - Filtro Ventana 20m",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition_sismo",
+              "leftValue": "={{ $json.alerta_activa }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "4",
+      "name": "If - ¿Hay Sismo Nuevo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/REEMPLAZAR_CON_TU_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"🚨 **Alerta Sísmica: Evento Detectado en Chile**\",\n  \"embeds\": [\n    {\n      \"title\": \"Sismo Magnitud M {{ $json.magnitud }}\",\n      \"description\": \"Se ha registrado un evento sísmico en el radio de monitoreo.\",\n      \"color\": 15158332,\n      \"fields\": [\n        {\n          \"name\": \"📍 Ubicación\",\n          \"value\": \"{{ $json.lugar }}\",\n          \"inline\": false\n        },\n        {\n          \"name\": \"📏 Magnitud\",\n          \"value\": \"{{ $json.magnitud }}\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"📉 Profundidad\",\n          \"value\": \"{{ $json.profundidad_km }} km\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"🕒 Hora Local\",\n          \"value\": \"{{ $json.hora_local }}\",\n          \"inline\": false\n        },\n        {\n          \"name\": \"🔗 Reporte USGS\",\n          \"value\": \"[Ver detalles oficiales]({{ $json.url_usgs }})\",\n          \"inline\": false\n        }\n      ],\n      \"footer\": {\n        \"text\": \"n8n Monitor de Alertas (P01) • USGS Earthquake Hazards Program\"\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "5",
+      "name": "Notificación Discord (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Cada 15m)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - USGS API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - USGS API": {
+      "main": [
+        [
+          {
+            "node": "Code - Filtro Ventana 20m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Filtro Ventana 20m": {
+      "main": [
+        [
+          {
+            "node": "If - ¿Hay Sismo Nuevo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If - ¿Hay Sismo Nuevo?": {
+      "main": [
+        [
+          {
+            "node": "Notificación Discord (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

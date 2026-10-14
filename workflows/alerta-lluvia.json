@@ -1,0 +1,175 @@
+{
+  "name": "P01 - Alerta de Lluvia Próxima (Open-Meteo)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger (Cada 3h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "latitude",
+              "value": "-33.0245"
+            },
+            {
+              "name": "longitude",
+              "value": "-71.5518"
+            },
+            {
+              "name": "hourly",
+              "value": "precipitation_probability,precipitation"
+            },
+            {
+              "name": "forecast_days",
+              "value": "2"
+            },
+            {
+              "name": "timezone",
+              "value": "America/Santiago"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "HTTP Request - Open-Meteo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Umbral de probabilidad de lluvia a monitorear (%)\nconst UMBRAL_PROBABILIDAD = 60;\nconst UBICACION = 'Viña del Mar, Chile';\n\nconst hourly = $input.first().json.hourly;\nif (!hourly || !hourly.time || !hourly.precipitation_probability) {\n  return [{ json: { alerta_activa: false, motivo: 'Sin datos horarios' } }];\n}\n\n// Obtener fecha y hora actual en zona local\nconst now = new Date();\nconst limite24h = new Date(now.getTime() + (24 * 60 * 60 * 1000));\n\nlet horasConLluvia = [];\nlet maxProbabilidad = 0;\n\nfor (let i = 0; i < hourly.time.length; i++) {\n  const horaItem = new Date(hourly.time[i]);\n  \n  // Evaluar solo las próximas 24 horas a partir del momento de ejecución\n  if (horaItem >= now && horaItem <= limite24h) {\n    const prob = hourly.precipitation_probability[i] || 0;\n    const prec = (hourly.precipitation && hourly.precipitation[i]) ? hourly.precipitation[i] : 0;\n    \n    if (prob > maxProbabilidad) {\n      maxProbabilidad = prob;\n    }\n    \n    if (prob >= UMBRAL_PROBABILIDAD) {\n      horasConLluvia.push({\n        hora: hourly.time[i],\n        probabilidad: prob,\n        precipitacion_mm: prec\n      });\n    }\n  }\n}\n\nif (horasConLluvia.length > 0) {\n  const primera = horasConLluvia[0];\n  return [{\n    json: {\n      alerta_activa: true,\n      ubicacion: UBICACION,\n      umbral_configurado: UMBRAL_PROBABILIDAD,\n      max_probabilidad: maxProbabilidad,\n      primera_hora_lluvia: primera.hora,\n      horas_afectadas: horasConLluvia.length,\n      mensaje: `🌧️ Alerta de Lluvia: Se espera lluvia en ${UBICACION} a partir de las ${primera.hora.split('T')[1]} con una probabilidad máxima del ${maxProbabilidad}%.`\n    }\n  }];\n} else {\n  return [{\n    json: {\n      alerta_activa: false,\n      ubicacion: UBICACION,\n      max_probabilidad: maxProbabilidad,\n      mensaje: `Condiciones estables en las próximas 24h (Probabilidad máx: ${maxProbabilidad}% debajo del umbral de ${UMBRAL_PROBABILIDAD}%).`\n    }\n  }];\n}"
+      },
+      "id": "3",
+      "name": "Code - Evaluar Próximas 24h",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition_alerta",
+              "leftValue": "={{ $json.alerta_activa }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "4",
+      "name": "If - ¿Supera Umbral?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/REEMPLAZAR_CON_TU_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"🌧️ **Alerta Meteorológica: Lluvia Inminente**\",\n  \"embeds\": [\n    {\n      \"title\": \"Pronóstico de Lluvia - {{ $json.ubicacion }}\",\n      \"description\": \"{{ $json.mensaje }}\",\n      \"color\": 3447003,\n      \"fields\": [\n        {\n          \"name\": \"Probabilidad Máxima\",\n          \"value\": \"{{ $json.max_probabilidad }}%\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"Inicio Estimado\",\n          \"value\": \"{{ $json.primera_hora_lluvia }}\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"Horas sobre el umbral\",\n          \"value\": \"{{ $json.horas_afectadas }} hora(s)\",\n          \"inline\": true\n        }\n      ],\n      \"footer\": {\n        \"text\": \"n8n Monitor de Alertas (P01) • Datos provistos por Open-Meteo\"\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "5",
+      "name": "Notificación Discord (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Cada 3h)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Open-Meteo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Open-Meteo": {
+      "main": [
+        [
+          {
+            "node": "Code - Evaluar Próximas 24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Evaluar Próximas 24h": {
+      "main": [
+        [
+          {
+            "node": "If - ¿Supera Umbral?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If - ¿Supera Umbral?": {
+      "main": [
+        [
+          {
+            "node": "Notificación Discord (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
